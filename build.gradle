@@ -1,0 +1,43 @@
+apply plugin: 'java'
+apply plugin: 'eclipse'
+
+configurations {
+	pluginjar
+	all*.exclude group: 'com.google.guava', module:'guava-jdk5'
+}
+
+project.ext {
+	pluginId = "googledrive"
+	pluginName = "Google Drive"
+	pluginVersion = "0.4.3-alpha"
+	pluginDebianVersion = "1"
+	pluginDate = new Date()
+	pluginAppMinVersion = "0.4.0-alpha"
+	pluginRelease = rootProject.ext.applicationRelease
+	pluginConflictsWith = ""
+
+	pluginVersionSnapshot = rootProject.ext.applicationVersionSnapshot
+	pluginVersionFull = "${pluginVersion}${pluginVersionSnapshot}"
+	pluginNeedsOperatingSystemAndArchitecture = false
+}
+
+dependencies {
+	compile		project(":syncany-lib")
+	compile		project(":syncany-util")
+
+	compile 	'com.google.api-client:google-api-client:1.19.1'
+	compile 	'com.google.apis:google-api-services-drive:v2-rev161-1.19.1'
+	//compile     ('com.google.guava:guava-jdk5:17.0') { force = true }
+	
+	pluginjar 	'com.google.http-client:google-http-client-jackson2:1.19.0'
+	pluginjar 	'com.google.apis:google-api-services-drive:v2-rev161-1.19.1'
+	pluginjar 	'com.google.api-client:google-api-client:1.19.1'
+	
+	testCompile	project(path: ":syncany-lib", configuration: "tests")
+	testCompile	project(path: ":syncany-util", configuration: "tests")
+	testCompile	"junit:junit:4.9"
+	testCompile	"org.apache.ftpserver:ftpserver-core:1.0.6"
+}
+
+apply from: 'core/gradle/gradle/plugins.jar.gradle'
+apply from: 'core/gradle/gradle/plugins.debian.gradle'
