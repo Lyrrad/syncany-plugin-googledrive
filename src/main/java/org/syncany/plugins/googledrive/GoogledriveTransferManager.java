@@ -36,14 +36,8 @@ import org.syncany.plugins.transfer.AbstractTransferManager;
 import org.syncany.plugins.transfer.StorageException;
 import org.syncany.plugins.transfer.StorageMoveException;
 import org.syncany.plugins.transfer.TransferManager;
-import org.syncany.plugins.transfer.files.ActionRemoteFile;
-import org.syncany.plugins.transfer.files.CleanupRemoteFile;
-import org.syncany.plugins.transfer.files.DatabaseRemoteFile;
-import org.syncany.plugins.transfer.files.MultichunkRemoteFile;
 import org.syncany.plugins.transfer.files.RemoteFile;
 import org.syncany.plugins.transfer.files.SyncanyRemoteFile;
-import org.syncany.plugins.transfer.files.TempRemoteFile;
-import org.syncany.plugins.transfer.files.TransactionRemoteFile;
 
 import com.google.api.client.googleapis.auth.oauth2.GoogleCredential;
 import com.google.api.client.http.FileContent;
@@ -53,21 +47,14 @@ import com.google.api.services.drive.Drive;
 import com.google.api.services.drive.Drive.Files;
 import com.google.api.services.drive.model.FileList;
 import com.google.api.services.drive.model.ParentReference;
+import com.google.api.services.drive.model.Property;
 
 /**
  * Implements a {@link TransferManager} based on an Google Drive storage backend for the
  * {@link GoogledriveTransferPlugin}.
  * <p/>
  * <p>Using an {@link GoogledriveTransferSettings}, the transfer manager is configured and uses
- * a Google Drive folder to store the Syncany repository data. While repo and
- * master file are stored in the given folder, databases and multichunks are stored
- * in special sub-folders:
- * <p/>
- * <ul>
- * <li>The <tt>databases</tt> folder keeps all the {@link DatabaseRemoteFile}s</li>
- * <li>The <tt>multichunks</tt> folder keeps the actual data within the {@link MultiChunkRemoteFile}s</li>
- * <li>The <tt>actions</tt> folder keeps the {@link ActionRemoteFile}s</li>
- * </ul>
+ * a Google Drive folder to store the Syncany repository data. 
  * <p/>
  * <p>All operations are auto-connected, i.e. a connection is automatically
  * established.
@@ -76,14 +63,10 @@ import com.google.api.services.drive.model.ParentReference;
  * 
  */
 public class GoogledriveTransferManager extends AbstractTransferManager {
+
 	private static final Logger logger = Logger.getLogger(GoogledriveTransferManager.class.getSimpleName());
 
 	private final Drive drive;
-	private static final String MULTICHINKS_PATH_NAME = "multichunks";
-	private static final String DATABASES_PATH_NAME = "databases";
-	private static final String ACTIONS_PATH_NAME = "actions";
-	private static final String TRANSACTIONS_PATH_NAME = "transactions";
-	private static final String TEMP_PATH_NAME = "temporary";
 	
 	private static final String APPLICATION_CONTENT_TYPE = "application/x-syncany";
 	private static final String FOLDER_CONTENT_TYPE = "application/vnd.google-apps.folder";
@@ -91,6 +74,8 @@ public class GoogledriveTransferManager extends AbstractTransferManager {
 	private static final String FILE_DESCRIPTION = "Syncany Google Drive Repository file";
 	
 	private static final String NOT_TRASHED = "trashed=false";
+
+	private static final String REMOTE_FILETYPE_PROPERTIES_KEY = "org.syncany.remotefiletype";
 	
 	private final GoogledriveTransferSettings settings;
 	
@@ -145,16 +130,10 @@ public class GoogledriveTransferManager extends AbstractTransferManager {
 			if (!testTargetExists() && createIfRequired) {
 				settings.setPathId(createFolder(settings.getPath(), null).getId());
 			}
-
-			settings.setMultichunksPathId(createFolder(MULTICHINKS_PATH_NAME, settings.getPathId()).getId());
-			settings.setDatabasesPathId(createFolder(DATABASES_PATH_NAME, settings.getPathId()).getId());
-			settings.setActionsPathId(createFolder(ACTIONS_PATH_NAME, settings.getPathId()).getId());
-			settings.setTransactionsPathId(createFolder(TRANSACTIONS_PATH_NAME, settings.getPathId()).getId());
-			settings.setTempPathId(createFolder(TEMP_PATH_NAME, settings.getPathId()).getId());
 			settings.setSetupComplete(true);
 		}
 		catch (IOException e) {
-			throw new StorageException("init: Cannot create required directories", e);
+			throw new StorageException("init: Cannot create required directory", e);
 		}
 		finally {
 			disconnect();
@@ -162,7 +141,6 @@ public class GoogledriveTransferManager extends AbstractTransferManager {
 	}
 
 	private com.google.api.services.drive.model.File createFolder(String path, String parentId) throws IOException{
-		
 		return createFolder(splitPath(path), parentId);
 	}
 	
@@ -231,29 +209,6 @@ public class GoogledriveTransferManager extends AbstractTransferManager {
 		return result;
 	}
 	
-	private com.google.api.services.drive.model.File getFolder(String folderName) throws StorageException {
-		try {
-			String requestSearch = assembleSearch(NOT_TRASHED, "title="+quoteString(folderName), quoteString(settings.getPathId()) + " in parents", "mimeType="+quoteString(FOLDER_CONTENT_TYPE));
-			Files.List request = drive.files().list().setQ(requestSearch);
-			FileList files = request.execute();
-			
-			if (files.getItems().isEmpty()) {
-				throw new StorageException("getFolder: Folder "+folderName+" does not exist.");
-			}
-			else if (files.getItems().size() != 1) {
-				throw new StorageException("getFolder: "+files.getItems().size()+" folders with name "+folderName+" exist.");
-			}
-			
-			return files.getItems().get(0);
-			
-		}
-		catch (Exception ex) {
-			logger.log(Level.WARNING, "getFolder: Target does NOT exist, error occurred.", ex);
-			throw new StorageException(ex);
-			
-		}
-	}
-	
 	@Override
 	public void download(RemoteFile remoteFile, File localFile) throws StorageException {
 		if (!remoteFile.getName().equals(".") && !remoteFile.getName().equals("..")) {
@@ -265,7 +220,7 @@ public class GoogledriveTransferManager extends AbstractTransferManager {
 					logger.log(Level.INFO, "Google Drive: Downloading {0} to temp file {1}", new Object[] { remoteFile.getName(), tempFile });
 				}
 				
-				com.google.api.services.drive.model.File curFile = getFileByName(getRemoteFolderId(remoteFile), remoteFile.getName());
+				com.google.api.services.drive.model.File curFile = getRemoteFile(remoteFile);
 				
 				if (curFile.getDownloadUrl() == null || curFile.getDownloadUrl().length() == 0) {
 					throw new StorageException("Cannot get download URL for file");
@@ -297,18 +252,26 @@ public class GoogledriveTransferManager extends AbstractTransferManager {
 		}
 	}
 
-	private java.util.List<com.google.api.services.drive.model.File> getFilesHelper(String folderId, String fileName) throws StorageException{
+	private java.util.List<com.google.api.services.drive.model.File> getRemoteFiles(RemoteFile remoteFile) throws StorageException{
+		return getRemoteFileHelper(remoteFile, remoteFile.getClass());
+	}
+
+	private <T extends RemoteFile> java.util.List<com.google.api.services.drive.model.File> getRemoteFiles(Class<T> remoteFileClass) throws StorageException{
+		return getRemoteFileHelper(null, remoteFileClass);
+	}
+	private  <T extends RemoteFile> java.util.List<com.google.api.services.drive.model.File> getRemoteFileHelper(RemoteFile remoteFile, Class<T> remoteFileClass) throws StorageException {
 		try {
 			ArrayList<String> requestList= new ArrayList<String>();
 			requestList.add(NOT_TRASHED);
 			
-			if (fileName != null) {
-				requestList.add("title="+quoteString(fileName));
+			if (remoteFile!= null) {
+				requestList.add("title=" + quoteString(remoteFile.getName()));
 			}
 			
-			if (folderId != null) {
-				requestList.add(quoteString(folderId)+" in parents");
-			}
+			requestList.add(quoteString(settings.getPathId()) + " in parents");
+			
+			requestList.add("properties has { key="+quoteString(REMOTE_FILETYPE_PROPERTIES_KEY) + " and value="+quoteString(remoteFileClass.getCanonicalName())+" and visibility='PUBLIC'"+" }");
+			
 			String[] requestArray = requestList.toArray(new String[requestList.size()]);
 			
 			Files.List request = drive.files().list().setQ(assembleSearch(requestArray));
@@ -322,8 +285,9 @@ public class GoogledriveTransferManager extends AbstractTransferManager {
 				
 					result.addAll(files.getItems());
 					request.setPageToken(files.getNextPageToken());
-				} catch (IOException ex) {
-					logger.log(Level.WARNING, "getFilesHelper: Error occurred.", ex);
+				}
+				catch (IOException ex) {
+					logger.log(Level.WARNING, "getRemoteFileHelper: Error occurred.", ex);
 					request.setPageToken(null);
 				}
 			} while (request.getPageToken() != null && request.getPageToken().length() > 0);
@@ -332,28 +296,20 @@ public class GoogledriveTransferManager extends AbstractTransferManager {
 			
 		}
 		catch (Exception ex) {
-			logger.log(Level.WARNING, "getFilesHelper: Target does NOT exist, error occurred.", ex);
+			logger.log(Level.WARNING, "getRemoteFileHelper: Target does NOT exist, error occurred.", ex);
 			throw new StorageException(ex);
 		}
 	}
 	
-	private java.util.List<com.google.api.services.drive.model.File> getFilesById(String folderId, String fileName) throws StorageException{
-		return getFilesHelper(folderId, fileName);
-	}
-	
-	private java.util.List<com.google.api.services.drive.model.File> getFolderContents(String folderId) throws StorageException{
-		return getFilesHelper(folderId, null);
-	}
-	
-	private com.google.api.services.drive.model.File getFileByName(String folderId, String fileName) throws StorageException{
-		java.util.List<com.google.api.services.drive.model.File> fileList = getFilesHelper(folderId, fileName);
+	private com.google.api.services.drive.model.File getRemoteFile(RemoteFile remoteFile) throws StorageException{
+		java.util.List<com.google.api.services.drive.model.File> fileList = getRemoteFiles(remoteFile);
 		if (fileList.isEmpty()) {
-			logger.log(Level.WARNING, "getFileByName: Target does NOT exist, error occurred.");
-			throw new StorageException("getFileByName: Target does NOT exist, error occurred.");
+			logger.log(Level.WARNING, "getRemoteFile: Target does NOT exist, error occurred.");
+			throw new StorageException("getRemoteFile: Target does NOT exist, error occurred.");
 		} 
 		else if (fileList.size() > 1) {
-			logger.log(Level.WARNING, "getFileByName: "+fileList.size()+ " files exist.");
-			throw new StorageException("getFileByName: "+fileList.size()+ " files exist.");
+			logger.log(Level.WARNING, "getRemoteFile: "+fileList.size()+ " files exist.");
+			throw new StorageException("getRemoteFile: "+fileList.size()+ " files exist.");
 		}
 		return fileList.get(0);
 	}
@@ -362,11 +318,17 @@ public class GoogledriveTransferManager extends AbstractTransferManager {
 	public void upload(File localFile, RemoteFile remoteFile) throws StorageException {
 		try {
 			if (logger.isLoggable(Level.INFO)) {
-				logger.log(Level.INFO, "Google Drive: Uploading {0} to temp file {1}", new Object[] { localFile, getRemoteFolderId(remoteFile) + ":" + ("temp-"+remoteFile.getName()) });
+				logger.log(Level.INFO, "Google Drive: Uploading {0} to temp file {1}", new Object[] { localFile, settings.getPathId() + ":" + ("temp-"+remoteFile.getName()) });
 			}
 
 			com.google.api.services.drive.model.File curFile = new com.google.api.services.drive.model.File();
-			curFile.setTitle("temp-"+remoteFile.getName()).setDescription(FILE_DESCRIPTION).setMimeType(APPLICATION_CONTENT_TYPE).setParents(Arrays.asList(new ParentReference().setId(getRemoteFolderId(remoteFile))));
+			
+			curFile.setTitle("temp-"+remoteFile.getName())
+				.setDescription(FILE_DESCRIPTION)
+				.setMimeType(APPLICATION_CONTENT_TYPE)
+				.setParents(Arrays.asList(new ParentReference().setId(settings.getPathId())))
+				.setProperties(Arrays.asList(new Property().setKey(REMOTE_FILETYPE_PROPERTIES_KEY).setValue(remoteFile.getClass().getCanonicalName()).setVisibility("PUBLIC")));
+			
 			FileContent mediaContent = new FileContent(APPLICATION_CONTENT_TYPE, localFile);
 			curFile = drive.files().insert(curFile, mediaContent).execute();
 
@@ -395,7 +357,7 @@ public class GoogledriveTransferManager extends AbstractTransferManager {
 	@Override
 	public boolean delete(RemoteFile remoteFile) throws StorageException {
 		try {
-			java.util.List<com.google.api.services.drive.model.File> curFiles = getFilesById(getRemoteFolderId(remoteFile), remoteFile.getName());
+			java.util.List<com.google.api.services.drive.model.File> curFiles = getRemoteFiles(remoteFile);
 			if (curFiles.isEmpty()) {
 				return true;
 			}
@@ -413,18 +375,13 @@ public class GoogledriveTransferManager extends AbstractTransferManager {
 
 	@Override
 	public void move(RemoteFile sourceFile, RemoteFile targetFile) throws StorageException {
-		String sourceFolderId = getRemoteFolderId(sourceFile);
-		String sourceFileName = sourceFile.getName();
 		
-		String targetFolderId = getRemoteFolderId(targetFile);
-		String targetFileName = targetFile.getName();
-
 		try {
-			com.google.api.services.drive.model.File curSourceFile = getFileByName(sourceFolderId, sourceFileName);
-			java.util.List<com.google.api.services.drive.model.File> curTargetFiles = getFilesById(targetFolderId, targetFileName);
+			com.google.api.services.drive.model.File curSourceFile = getRemoteFile(sourceFile);
+			java.util.List<com.google.api.services.drive.model.File> curTargetFiles = getRemoteFiles(targetFile);
 
 			if (curTargetFiles.size() > 1) {
-				throw new IOException("Multiple destination files matching destination criteria");
+				throw new IOException("Multiple destination files matching criteria");
 			}
 			
 			com.google.api.services.drive.model.File curTargetFile = null;
@@ -433,17 +390,15 @@ public class GoogledriveTransferManager extends AbstractTransferManager {
 				curTargetFile = curTargetFiles.get(0);  
 			}
 			
-			boolean modified = false;
-			
 			//Rename file
-			if (!sourceFileName.equals(targetFileName)) {
+			if (!sourceFile.getName().equals(targetFile.getName())) {
 				if (logger.isLoggable(Level.INFO)) {
-					logger.log(Level.INFO, "Google Drive: Renaming file {0} to file {1}", new Object[] { sourceFileName, targetFileName});
+					logger.log(Level.INFO, "Google Drive: Renaming file {0} to file {1}", new Object[] { sourceFile.getName(), targetFile.getName()});
 				}
-				modified = true;
 				com.google.api.services.drive.model.File patchFile = new com.google.api.services.drive.model.File();
-				patchFile.setTitle(targetFileName);
-				patchFile  = drive.files().patch(curSourceFile.getId(),  patchFile).setFields("title").execute();
+				patchFile.setTitle(targetFile.getName());
+				patchFile.setProperties(Arrays.asList(new Property().setKey(REMOTE_FILETYPE_PROPERTIES_KEY).setValue(targetFile.getClass().getCanonicalName()).setVisibility("PUBLIC")));
+				patchFile  = drive.files().patch(curSourceFile.getId(),  patchFile).setFields("title,properties").execute();
 
 				if (patchFile == null) {
 					if (logger.isLoggable(Level.WARNING)) {
@@ -451,38 +406,24 @@ public class GoogledriveTransferManager extends AbstractTransferManager {
 					}
 					throw new StorageException("Renaming Failed");
 				}
-				
-			}
-			
-			//Change folder
-			if (!sourceFolderId.equals(targetFolderId)) {
-				if (logger.isLoggable(Level.INFO)) {
-					logger.log(Level.INFO, "Google Drive: Moving file {0} from folder {1} to {2}", new Object[] { sourceFileName, sourceFolderId, targetFolderId});
+				if (curTargetFile != null) {
+					//delete destination if target exists
+					drive.files().delete(curTargetFile.getId()).execute();
 				}
-				modified = true;
-				drive.parents().delete(curSourceFile.getId(), sourceFolderId).execute();
-				drive.parents().insert(curSourceFile.getId(), new ParentReference().setId(targetFolderId)).execute();
-
 			}
 			
-			if (modified && curTargetFile != null) {
-				//delete destination if moved, and target exists
-				drive.files().delete(curTargetFile.getId()).execute();
-			}
+			
 		}
 		catch (IOException e) {
-			logger.log(Level.SEVERE, "Could not rename file " + sourceFolderId+ ":" + sourceFileName + " to " + targetFolderId + ":" + targetFileName, e);
-			throw new StorageMoveException("Could not rename file " + sourceFolderId+ ":" + sourceFileName + " to " + targetFolderId + ":" + targetFileName, e);
+			logger.log(Level.SEVERE, "Could not rename file " + sourceFile.getName() + " to " + targetFile.getName(), e);
+			throw new StorageMoveException("Could not rename file " + sourceFile.getName() + " to " + targetFile.getName(), e);
 		}
 	}
 
 	@Override
 	public <T extends RemoteFile> Map<String, T> list(Class<T> remoteFileClass) throws StorageException {
 		try {
-			// List folder
-			String remoteFolderID = getRemoteFolderIdString(remoteFileClass);
-
-			java.util.List<com.google.api.services.drive.model.File> listing = getFolderContents(remoteFolderID);
+			java.util.List<com.google.api.services.drive.model.File> listing = getRemoteFiles(remoteFileClass);
 			
 			// Create RemoteFile objects
 			Map<String, T> remoteFiles = new HashMap<String, T>();
@@ -504,31 +445,6 @@ public class GoogledriveTransferManager extends AbstractTransferManager {
 			disconnect();
 			logger.log(Level.SEVERE, "Unable to list Google Drive directory.", ex);
 			throw new StorageException(ex);
-		}
-	}
-
-	private String getRemoteFolderId(RemoteFile remoteFile) {
-		return getRemoteFolderIdString(remoteFile.getClass());
-	}
-
-	private String getRemoteFolderIdString(Class<? extends RemoteFile> remoteFile) {
-		if (remoteFile.equals(MultichunkRemoteFile.class)) {
-			return settings.getMultichunksPathId();
-		}
-		else if (remoteFile.equals(DatabaseRemoteFile.class) || remoteFile.equals(CleanupRemoteFile.class)) {
-			return settings.getDatabasesPathId();
-		}
-		else if (remoteFile.equals(ActionRemoteFile.class)) {
-			return settings.getActionsPathId();
-		}
-		else if (remoteFile.equals(TransactionRemoteFile.class)) {
-			return settings.getTransactionsPathId();
-		}
-		else if (remoteFile.equals(TempRemoteFile.class)) {
-			return settings.getTempPathId();
-		}
-		else {
-			return settings.getPathId();
 		}
 	}
 
@@ -577,7 +493,7 @@ public class GoogledriveTransferManager extends AbstractTransferManager {
 				Files.List request = drive.files().list().setQ(requestSearch);
 				FileList files = request.execute();
 				
-				if (files.isEmpty()) {
+				if (files.getItems().isEmpty()) {
 					logger.log(Level.INFO, "testTargetExists: Target does NOT exist.");
 					return false;
 				} else if (files.getItems().size() != 1) {
@@ -591,17 +507,7 @@ public class GoogledriveTransferManager extends AbstractTransferManager {
 			if (!settings.isSetupComplete()) {
 				// When connecting to an existing repository, retrieve the path ids and store them
 				settings.setPathId(parent);
-				try {
-					settings.setMultichunksPathId(getFolder(MULTICHINKS_PATH_NAME).getId());
-					settings.setDatabasesPathId(getFolder(DATABASES_PATH_NAME).getId());
-					settings.setActionsPathId(getFolder(ACTIONS_PATH_NAME).getId());
-					settings.setTransactionsPathId(getFolder(TRANSACTIONS_PATH_NAME).getId());
-					settings.setTempPathId(getFolder(TEMP_PATH_NAME).getId());
-					settings.setSetupComplete(true);
-				}
-				catch (StorageException e) {
-					logger.log(Level.INFO, "not all subfolders exist yet, which is fine if it's still initializing the repository", e);
-				}
+				settings.setSetupComplete(true);
 			}
 			
 			logger.log(Level.INFO, "testTargetExists: Target does exist.");
@@ -641,19 +547,18 @@ public class GoogledriveTransferManager extends AbstractTransferManager {
 	public boolean testRepoFileExists() {
 		try {
 			SyncanyRemoteFile remoteFile= new SyncanyRemoteFile();
-			String remoteFolderId = getRemoteFolderId(remoteFile);
-			java.util.List<com.google.api.services.drive.model.File> curFiles = getFilesById(remoteFolderId, remoteFile.getName());
+			java.util.List<com.google.api.services.drive.model.File> curFiles = getRemoteFiles(remoteFile);
 			
 			if (curFiles.isEmpty()) {
-				logger.log(Level.INFO, "testRepoFileExists: Repo file DOES NOT exist at " + remoteFolderId+":"+remoteFile.getName());
+				logger.log(Level.INFO, "testRepoFileExists: Repo file DOES NOT exist.");
 				return false;
 			}
 			else if (curFiles.size() == 1) {
-				logger.log(Level.INFO, "testRepoFileExists: Repo file exists at " + remoteFolderId+":"+remoteFile.getName());
+				logger.log(Level.INFO, "testRepoFileExists: Repo file exists.");
 				return true;
 			}
 			else {
-				throw new StorageException("testRepoFileExists: Multiple Repo files exist at " + remoteFolderId+":"+remoteFile.getName());
+				throw new StorageException("testRepoFileExists: Multiple Repo files exist.");
 			}
 		}
 		catch (Exception e) {

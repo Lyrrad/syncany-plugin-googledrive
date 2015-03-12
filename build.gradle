@@ -27,7 +27,6 @@ dependencies {
 
 	compile 	'com.google.api-client:google-api-client:1.19.1'
 	compile 	'com.google.apis:google-api-services-drive:v2-rev161-1.19.1'
-	//compile     ('com.google.guava:guava-jdk5:17.0') { force = true }
 	
 	pluginjar 	'com.google.http-client:google-http-client-jackson2:1.19.0'
 	pluginjar 	'com.google.apis:google-api-services-drive:v2-rev161-1.19.1'

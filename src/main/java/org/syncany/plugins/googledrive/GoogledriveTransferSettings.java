@@ -58,38 +58,13 @@ public class GoogledriveTransferSettings extends TransferSettings {
 	@Setup(order = 2, visible = false)
 	@Encrypted
 	private String pathId;
-	
-	@Element(name = "multichunksPathId", required = false)
-	@Setup(order = 3, visible = false)
-	@Encrypted
-	private String multichunksPathId;
-	
-	@Element(name = "databasesPathId", required = false)
-	@Setup(order = 4, visible = false)
-	@Encrypted
-	private String databasesPathId;
-	
-	@Element(name = "actionsPathId", required = false)
-	@Setup(order = 5, visible = false)
-	@Encrypted
-	private String actionsPathId;
-	
-	@Element(name = "transactionsPathId", required = false)
-	@Setup(order = 6, visible = false)
-	@Encrypted
-	private String transactionsPathId;
-	
-	@Element(name = "tempPathId", required = false)
-	@Setup(order = 7, visible = false)
-	@Encrypted
-	private String tempPathId;
-	
+
 	@Element(name = "path", required = true)
-	@Setup(order = 8, description = "Relative path on Google Drive")
+	@Setup(order = 3, description = "Relative path on Google Drive")
 	private String path;
 	
 	@Element(name = "isSetupComplete", required = true)
-	@Setup(order = 9, visible=false)
+	@Setup(order = 4, visible=false)
 	private boolean isSetupComplete;
 
 	public String getRefreshToken() {
@@ -106,46 +81,6 @@ public class GoogledriveTransferSettings extends TransferSettings {
 
 	public void setPathId(String pathId) {
 		this.pathId = pathId;
-	}
-
-	public String getMultichunksPathId() {
-		return multichunksPathId;
-	}
-
-	public void setMultichunksPathId(String multichunksPathId) {
-		this.multichunksPathId = multichunksPathId;
-	}
-
-	public String getDatabasesPathId() {
-		return databasesPathId;
-	}
-
-	public void setDatabasesPathId(String databasesPathId) {
-		this.databasesPathId = databasesPathId;
-	}
-
-	public String getActionsPathId() {
-		return actionsPathId;
-	}
-
-	public void setActionsPathId(String actionsPathId) {
-		this.actionsPathId = actionsPathId;
-	}
-
-	public String getTransactionsPathId() {
-		return transactionsPathId;
-	}
-
-	public void setTransactionsPathId(String transactionsPathId) {
-		this.transactionsPathId = transactionsPathId;
-	}
-
-	public String getTempPathId() {
-		return tempPathId;
-	}
-
-	public void setTempPathId(String tempPathId) {
-		this.tempPathId = tempPathId;
 	}
 
 	public String getPath() {
